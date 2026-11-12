@@ -1,0 +1,22 @@
+{
+  "name": "voiceup-ai",
+  "version": "1.0.0",
+  "private": true,
+  "description": "VOICEUP AI - an AI voice and communication coach built on React + Vite, Firebase and Netlify.",
+  "license": "MIT",
+  "scripts": {
+    "install:all": "npm --prefix web install && npm --prefix functions install",
+    "dev:web": "npm --prefix web run dev",
+    "dev:functions": "npm --prefix functions run build && firebase emulators:start --only functions,firestore,auth,storage",
+    "build": "npm --prefix web run build && npm --prefix functions run build",
+    "build:web": "npm --prefix web run build",
+    "build:functions": "npm --prefix functions run build",
+    "test": "npm --prefix functions run test && npm --prefix web run test",
+    "lint": "npm --prefix web run lint && npm --prefix functions run lint",
+    "check:secrets": "node scripts/check-secrets.mjs",
+    "verify": "npm run check:secrets && npm run build && npm run test",
+    "deploy:functions": "npm --prefix functions run build && firebase deploy --only functions,firestore:rules,storage",
+    "deploy:rules": "firebase deploy --only firestore:rules,firestore:indexes,storage"
+  },
+  "devDependencies": {}
+}

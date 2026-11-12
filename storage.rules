@@ -1,0 +1,45 @@
+rules_version = '2';
+
+// =============================================================================
+// VOICEUP AI - Cloud Storage security rules
+// -----------------------------------------------------------------------------
+// Users can upload and play back only their own recordings. Nothing is public.
+// Limits: 12 MB per object, audio content types only.
+// =============================================================================
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    function isAudio() {
+      return request.resource.contentType.matches('audio/.*')
+          || request.resource.contentType == 'video/webm';
+    }
+
+    // Raw practice recordings
+    match /recordings/{userId}/{fileName} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId)
+        && isAudio()
+        && request.resource.size < 12 * 1024 * 1024;
+      allow update: if false;
+      allow delete: if isOwner(userId);
+    }
+
+    // Server-generated speech (TTS) - read only for the owner
+    match /tts/{userId}/{fileName} {
+      allow read: if isOwner(userId);
+      allow write: if false;
+    }
+
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -1,0 +1,102 @@
+rules_version = '2';
+
+// =============================================================================
+// VOICEUP AI - Firestore security rules
+// -----------------------------------------------------------------------------
+// Principle: the client may read and write ONLY its own profile, its own
+// sessions and its own roleplay threads, and may never write a score,
+// transcript or usage counter. Everything privileged is written by Cloud
+// Functions through the Admin SDK, which bypasses these rules.
+// =============================================================================
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    function isAdmin() {
+      return signedIn() && request.auth.token.admin == true;
+    }
+
+    // --- User profile -----------------------------------------------------
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create: if isOwner(userId)
+        && request.resource.data.uid == userId
+        && request.resource.data.keys().hasOnly([
+             'uid', 'email', 'displayName', 'photoURL', 'createdAt',
+             'targetLanguage', 'voice', 'level', 'streakDays', 'lastActiveAt'
+           ]);
+      allow update: if isOwner(userId)
+        && request.resource.data.uid == userId
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['displayName', 'photoURL', 'targetLanguage', 'voice', 'lastActiveAt']);
+      allow delete: if false;
+
+      // Server-owned usage counters: readable, never client-writable.
+      match /usage/{day} {
+        allow read: if isOwner(userId) || isAdmin();
+        allow write: if false;
+      }
+
+      // Roleplay threads: the client may create a thread but only the server
+      // may append assistant turns or change scoring metadata.
+      match /roleplay/{threadId} {
+        allow read: if isOwner(userId) || isAdmin();
+        allow create: if isOwner(userId)
+          && request.resource.data.uid == userId
+          && request.resource.data.messages.size() <= 1;
+        allow update: if isOwner(userId)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['title']);
+        allow delete: if isOwner(userId);
+      }
+    }
+
+    // --- Sessions (recordings, transcripts, scores) ------------------------
+    match /sessions/{sessionId} {
+      allow read: if isOwner(resource.data.uid) || isAdmin();
+
+      // A client may create a session shell. It may NOT supply a transcript
+      // or a score - those are written by Cloud Functions only.
+      allow create: if isOwner(request.resource.data.uid)
+        && !request.resource.data.keys().hasAny(['transcript', 'score', 'feedback'])
+        && request.resource.data.type in ['coach', 'lesson', 'roleplay']
+        && request.resource.data.durationMs is number
+        && request.resource.data.durationMs >= 0
+        && request.resource.data.durationMs <= 600000;
+
+      // The client may only tidy up its own metadata, never results.
+      allow update: if isOwner(resource.data.uid)
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['title', 'notes', 'audioPath', 'durationMs', 'status']);
+      allow delete: if isOwner(resource.data.uid);
+    }
+
+    // --- Curriculum (static, world readable) ------------------------------
+    match /lessons/{lessonId} {
+      allow read: if signedIn();
+      allow write: if isAdmin();
+    }
+    match /scenarios/{scenarioId} {
+      allow read: if signedIn();
+      allow write: if isAdmin();
+    }
+
+    // --- AI provider configuration: SERVER ONLY ---------------------------
+    // Contains API keys. No client read or write, at all. The UI talks to the
+    // `listProviders` / `saveProvider` callables, which return metadata only.
+    match /aiProviders/{providerId} {
+      allow read, write: if false;
+    }
+
+    // --- Anything else is denied ------------------------------------------
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
